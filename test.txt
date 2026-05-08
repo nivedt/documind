@@ -1,1 +1,0 @@
-DocuMind is a RAG-powered document intelligence API built with FastAPI, LangChain, pgvector and OpenAI. It allows users to upload documents and ask questions about them in natural language.
