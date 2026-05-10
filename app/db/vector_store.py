@@ -7,6 +7,7 @@ Table: document_chunks
     chunk_index   position of chunk within the document
     chunk_text    raw text of the chunk
     embedding     vector(1536)  — text-embedding-3-small dimensions
+    page_number   source page in the original PDF (NULL for TXT files)
 """
 import logging
 import uuid
@@ -32,6 +33,7 @@ class DocumentChunk(Base):
     chunk_index = Column(Integer, nullable=False)
     chunk_text = Column(Text, nullable=False)
     embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
+    page_number = Column(Integer, nullable=True)  # NULL for TXT files
 
 
 async def insert_chunks(
@@ -39,8 +41,10 @@ async def insert_chunks(
     document_id: str,
     chunks: list[str],
     embeddings: list[list[float]],
+    page_numbers: list[int | None] | None = None,
 ) -> None:
-    """Bulk-insert text chunks with their embeddings."""
+    """Bulk-insert text chunks with their embeddings and optional page numbers."""
+    pages = page_numbers if page_numbers is not None else [None] * len(chunks)
     rows = [
         DocumentChunk(
             id=str(uuid.uuid4()),
@@ -48,8 +52,9 @@ async def insert_chunks(
             chunk_index=i,
             chunk_text=chunk,
             embedding=embedding,
+            page_number=page,
         )
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings))
+        for i, (chunk, embedding, page) in enumerate(zip(chunks, embeddings, pages))
     ]
     session.add_all(rows)
     await session.commit()
@@ -66,7 +71,7 @@ async def similarity_search(
     # Use pgvector cosine distance operator (<=>)
     stmt = text(
         """
-        SELECT chunk_index, chunk_text,
+        SELECT chunk_index, chunk_text, page_number,
                1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
         FROM document_chunks
         WHERE document_id = :document_id
@@ -85,6 +90,11 @@ async def similarity_search(
     rows = result.fetchall()
     logger.debug("similarity_search returned %d rows for document %s", len(rows), document_id)
     return [
-        {"chunk_index": row.chunk_index, "chunk_text": row.chunk_text, "similarity": float(row.similarity)}
+        {
+            "chunk_index": row.chunk_index,
+            "chunk_text": row.chunk_text,
+            "page_number": row.page_number,
+            "similarity": float(row.similarity),
+        }
         for row in rows
     ]

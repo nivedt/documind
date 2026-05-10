@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ── Ingest ────────────────────────────────────────────────────────────────────
@@ -9,6 +9,8 @@ class IngestResponse(BaseModel):
     document_id: str
     filename: str
     chunk_count: int
+    file_type: Optional[str] = None
+    page_count: Optional[int] = None
     status: str = "processed"
 
 
@@ -22,6 +24,7 @@ class QueryRequest(BaseModel):
 class SourceChunk(BaseModel):
     chunk_text: str
     chunk_index: int
+    page_number: Optional[int] = None
 
 
 class QueryResponse(BaseModel):
@@ -36,6 +39,10 @@ class DocumentMeta(BaseModel):
     filename: str
     chunk_count: int
     created_at: datetime
+    uploaded_at: Optional[datetime] = None
+    file_size: Optional[int] = None
+    file_type: Optional[str] = None
+    page_count: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

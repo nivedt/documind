@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.metadata import create_document, get_session
 from app.db.vector_store import insert_chunks
 from app.models.schemas import IngestResponse
-from app.services.chunker import chunk_text
+from app.services.chunker import chunk_pages, chunk_text
 from app.services.embedder import embed_texts
 
 logger = logging.getLogger(__name__)
@@ -25,12 +25,15 @@ ALLOWED_CONTENT_TYPES = {
 MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
 
 
-def _extract_text_from_pdf(data: bytes) -> str:
+def _extract_pages_from_pdf(data: bytes) -> list[tuple[int, str]]:
+    """Return a list of (1-based page_number, page_text) tuples."""
     try:
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(data))
-        pages = [page.extract_text() or "" for page in reader.pages]
-        return "\n".join(pages)
+        return [
+            (i + 1, reader.pages[i].extract_text() or "")
+            for i in range(len(reader.pages))
+        ]
     except Exception as exc:
         logger.error("PDF extraction failed: %s", exc)
         raise HTTPException(
@@ -71,26 +74,42 @@ async def ingest_document(
             detail="Uploaded file is empty.",
         )
 
-    # ── Extract text ──────────────────────────────────────────────────────────
-    logger.info("Ingesting file: %s (%s, %d bytes)", file.filename, content_type, len(data))
+    # ── Extract text (page-aware for PDFs) ───────────────────────────────────
+    file_size = len(data)
+    logger.info("Ingesting file: %s (%s, %d bytes)", file.filename, content_type, file_size)
+
+    page_count: int | None = None
+    chunk_dicts: list[dict]  # [{"chunk_text": str, "page_number": int | None}]
+
     if content_type == "application/pdf":
-        raw_text = _extract_text_from_pdf(data)
+        pdf_pages = _extract_pages_from_pdf(data)
+        page_count = len(pdf_pages)
+        all_text = "".join(t for _, t in pdf_pages)
+        if not all_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No extractable text found in the uploaded PDF.",
+            )
+        chunk_dicts = chunk_pages(pdf_pages)
+        file_type = "pdf"
     else:
         raw_text = _extract_text_from_txt(data)
+        if not raw_text.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No extractable text found in the uploaded file.",
+            )
+        chunk_dicts = [{"chunk_text": c, "page_number": None} for c in chunk_text(raw_text)]
+        file_type = "txt"
 
-    if not raw_text.strip():
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No extractable text found in the uploaded file.",
-        )
-
-    # ── Chunk ─────────────────────────────────────────────────────────────────
-    chunks = chunk_text(raw_text)
-    if not chunks:
+    if not chunk_dicts:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Document produced zero chunks after processing.",
         )
+
+    chunks = [d["chunk_text"] for d in chunk_dicts]
+    page_numbers: list[int | None] = [d["page_number"] for d in chunk_dicts]
 
     # ── Embed ─────────────────────────────────────────────────────────────────
     try:
@@ -104,18 +123,26 @@ async def ingest_document(
 
     # ── Store ─────────────────────────────────────────────────────────────────
     document_id = str(uuid.uuid4())
-    await insert_chunks(session, document_id, chunks, embeddings)
+    await insert_chunks(session, document_id, chunks, embeddings, page_numbers)
     doc = await create_document(
         session,
         document_id=document_id,
         filename=file.filename or "unknown",
         chunk_count=len(chunks),
+        file_size=file_size,
+        file_type=file_type,
+        page_count=page_count,
     )
 
-    logger.info("Ingest complete: document_id=%s chunks=%d", document_id, len(chunks))
+    logger.info(
+        "Ingest complete: document_id=%s type=%s chunks=%d pages=%s",
+        document_id, file_type, len(chunks), page_count,
+    )
     return IngestResponse(
         document_id=doc.id,
         filename=doc.filename,
         chunk_count=doc.chunk_count,
+        file_type=doc.file_type,
+        page_count=doc.page_count,
         status="processed",
     )

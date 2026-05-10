@@ -62,7 +62,11 @@ async def query_document(
         ) from exc
 
     sources = [
-        SourceChunk(chunk_text=c["chunk_text"], chunk_index=c["chunk_index"])
+        SourceChunk(
+            chunk_text=c["chunk_text"],
+            chunk_index=c["chunk_index"],
+            page_number=c.get("page_number"),
+        )
         for c in chunks
     ]
 
@@ -87,6 +91,10 @@ async def list_all_documents(
                 filename=d.filename,
                 chunk_count=d.chunk_count,
                 created_at=d.created_at,
+                uploaded_at=d.uploaded_at,
+                file_size=d.file_size,
+                file_type=d.file_type,
+                page_count=d.page_count,
             )
             for d in docs
         ]

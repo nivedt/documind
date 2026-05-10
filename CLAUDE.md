@@ -77,7 +77,22 @@ docker compose up --build
 # Docs: http://localhost:8000/docs
 ```
 
-## What to Build Next — Stage 2
+## Stage 2 — Complete ✅
+
+- [x] **Page-aware PDF ingestion** — `pypdf` extracts text page-by-page; `chunk_pages()` in `chunker.py` tags every chunk with its 1-based `page_number`; TXT files use `chunk_text()` as before (page_number = NULL)
+- [x] **Enhanced documents table** — added `uploaded_at` (timestamp), `file_size` (bytes), `file_type` ('pdf'/'txt'), `page_count` (NULL for TXT) columns to the `documents` ORM model and `create_document` helper
+- [x] **page_number in query sources** — `document_chunks` table has a `page_number` column; `similarity_search` returns it; `SourceChunk` schema surfaces it so callers always know which page an answer came from
+- [x] **`pypdf` in requirements.txt** — was already present from Stage 1
+
+> **Note:** `init_db` uses SQLAlchemy `create_all` which only creates missing tables. If you have an existing database from Stage 1, recreate it (`docker compose down -v && docker compose up --build`) to pick up the new columns. Alembic migrations are Stage 3.
+
+## Architecture Decisions (Stage 2 additions)
+
+**Page-by-page chunking for PDFs** — rather than joining all pages and inferring page numbers from character offsets (fragile), each page is chunked independently. This gives exact page provenance at the cost of not spanning chunk windows across page boundaries — an acceptable trade-off for a citation-focused API.
+
+**`page_number` nullable throughout** — TXT files have no concept of pages; NULL signals this clearly rather than using a sentinel like -1.
+
+## What to Build Next — Stage 3
 
 - [ ] **IVFFlat index** on `document_chunks.embedding` for sub-linear search at scale
 - [ ] **Alembic migrations** to manage schema changes safely in production
