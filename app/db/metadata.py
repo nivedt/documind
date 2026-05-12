@@ -35,6 +35,9 @@ engine = create_async_engine(
 
 _SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
+# Public alias — use this in background tasks that cannot use Depends()
+session_factory = _SessionFactory
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with _SessionFactory() as session:

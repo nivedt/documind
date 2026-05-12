@@ -4,10 +4,11 @@ GET  /documents — list all ingested documents.
 """
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.metadata import get_document, get_session, list_documents
+from app.limiter import limiter
 from app.models.schemas import (
     DocumentListResponse,
     DocumentMeta,
@@ -23,7 +24,9 @@ router = APIRouter()
 
 
 @router.post("/query", response_model=QueryResponse)
+@limiter.limit("30/minute")
 async def query_document(
+    request: Request,
     body: QueryRequest,
     session: AsyncSession = Depends(get_session),
 ) -> QueryResponse:

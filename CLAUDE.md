@@ -92,14 +92,30 @@ docker compose up --build
 
 **`page_number` nullable throughout** — TXT files have no concept of pages; NULL signals this clearly rather than using a sentinel like -1.
 
-## What to Build Next — Stage 3
+## Stage 3 — Complete ✅
+
+- [x] **Async background ingestion** — `POST /ingest` validates the file and returns `202 Accepted` with a `job_id` immediately; all heavy work (extract → chunk → embed → store) runs in a FastAPI `BackgroundTask`; `GET /status/{job_id}` exposes `pending | processing | complete | failed` state
+- [x] **In-memory job store** — `app/jobs.py` holds job state in a module-level dict with LRU eviction at 1 000 entries; designed to be swapped for Redis/DB in production
+- [x] **Rate limiting** — `slowapi` limiter keyed on client IP; `/ingest` capped at 10 req/min, `/query` at 30 req/min
+- [x] **Structured error responses** — custom exception handlers for `HTTPException`, `RequestValidationError`, and `RateLimitExceeded` all return `{ error_code, message, details }` — consistent across every endpoint
+- [x] **Request logging middleware** — `app/middleware/logging.py` logs every request with method, path, status code, and elapsed milliseconds via the `documind.access` logger
+
+## Architecture Decisions (Stage 3 additions)
+
+**BackgroundTasks over Celery/ARQ** — FastAPI's built-in `BackgroundTasks` runs in the same event loop, which is sufficient for the current single-worker setup. The background task creates its own DB session (`session_factory()`) because the request-scoped `Depends(get_session)` session is closed before the task runs.
+
+**In-process job store** — a module-level dict is the right default for a single-process service. It's zero-dependency and survives restarts aren't required for a dev/staging environment. Swapping to Redis is a one-file change to `app/jobs.py`.
+
+**Structured errors via exception handlers** — rather than wrapping every `raise HTTPException` with a helper, a single global handler intercepts all `HTTPException` instances and reformats them. This keeps endpoint code clean and guarantees consistency even for framework-generated errors (e.g. 405 Method Not Allowed).
+
+**slowapi over custom middleware** — slowapi integrates cleanly with FastAPI's decorator model, supports per-endpoint limits, and uses `limits` under the hood for accurate sliding-window counting.
+
+## What to Build Next — Stage 4
 
 - [ ] **IVFFlat index** on `document_chunks.embedding` for sub-linear search at scale
 - [ ] **Alembic migrations** to manage schema changes safely in production
 - [ ] **Authentication** — API key or JWT middleware
-- [ ] **Rate limiting** — per-IP or per-API-key request throttling
 - [ ] **Streaming responses** — SSE or WebSocket for `/query` so answers stream token-by-token
-- [ ] **Async background ingestion** — return a job ID immediately; process in a Celery/ARQ worker
 - [ ] **Multi-document query** — accept a list of `document_id`s and merge retrieval results
 - [ ] **Evaluation harness** — RAGAS or a custom script to measure answer faithfulness/relevance
 - [ ] **CI/CD** — GitHub Actions: lint (ruff), type-check (mypy), integration tests (pytest + testcontainers)
